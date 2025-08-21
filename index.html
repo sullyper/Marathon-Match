@@ -144,7 +144,7 @@ def generate_html(scores_by_id, player_points, player_scores):
                 score_class = "text-green-600 font-bold"
 
             # Format the score to 2 decimal places
-            formatted_score = f"{score_for_id:.2f}" if score_for_id > 0 else "N/A"
+            formatted_score = f"{score_for_id:.2f}" if score_for_id > 0 else "."
             scores_by_name_html += f'<td class="py-3 px-3 text-left {score_class}">{formatted_score}</td>'
 
         scores_by_name_html += """
@@ -236,7 +236,7 @@ def generate_html(scores_by_id, player_points, player_scores):
                 score_class = "text-green-600 font-bold"
 
             # Format the score to 2 decimal places
-            formatted_score = f"{score_for_id:.2f}" if score_for_id > 0 else "N/A"
+            formatted_score = f"{score_for_id:.2f}" if score_for_id > 0 else "."
             extended_scores_by_name_html += f'<td class="py-3 px-3 text-left {score_class}">{formatted_score}</td>'
 
         extended_scores_by_name_html += """

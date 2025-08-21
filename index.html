@@ -1,255 +1,4 @@
-# generate_results_html.py
-#
-# This script reads a results.csv file and generates a static HTML page
-# with two tables: one showing the best scores for each seed, and another
-# ranking players based on a point system.
-#
-# Usage: python generate_results_html.py /path/to/to/folder
-# If no folder is provided, it defaults to the current directory.
 
-import os
-import csv
-import sys
-from collections import defaultdict
-from itertools import groupby
-
-def read_csv_data(folder_path, names_to_skip):
-    """
-    Reads results.csv and returns the data as a list of dictionaries,
-    skipping rows for specified names.
-    Returns None if the file is not found.
-    """
-    results_file_path = os.path.join(folder_path, 'results.csv')
-    if not os.path.exists(results_file_path):
-        print(f"Error: '{results_file_path}' not found.")
-        return None
-
-    data = []
-    try:
-        with open(results_file_path, 'r', newline='') as csvfile:
-            reader = csv.DictReader(csvfile)
-            for row in reader:
-                # Skip the row if the name is in the list of names to skip
-                if row['name'] in names_to_skip:
-                    continue
-                # Ensure scores are treated as floats
-                row['score'] = float(row['score'])
-                # Convert id to int for easier handling
-                row['id'] = int(row['id'])
-                data.append(row)
-    except Exception as e:
-        print(f"Error reading {results_file_path}: {e}")
-        return None
-
-    return data
-
-def calculate_points(data):
-    """
-    Calculates points for each player based on their ranks for each seed.
-    Returns a dictionary of player points and a dictionary of player scores.
-    """
-    # Point system as specified in the prompt
-    points_list = [100, 75, 60, 50, 45, 40, 36, 32, 29, 26, 24, 22, 20, 18, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
-    # Pad the rest with 1 point for ties
-    points_list.extend([1] * 100) # Extend to handle more than 29 players
-
-    player_scores = defaultdict(lambda: defaultdict(lambda: float('inf')))
-
-    # Get the best score for each player/id combination
-    for row in data:
-        name = row['name']
-        player_id = row['id']
-        score = row['score']
-        if score > 0 and score < player_scores[name][player_id]:
-            player_scores[name][player_id] = score
-
-    # Structure scores by id to rank them
-    scores_by_id = defaultdict(list)
-    for name, scores in player_scores.items():
-        for player_id, score in scores.items():
-            if player_id <= 20:  # Only consider IDs 1-10
-                scores_by_id[player_id].append({'name': name, 'score': score})
-
-    player_points = defaultdict(lambda: {'total': 0, 'pts': defaultdict(int)})
-
-    # Calculate points for each seed (ID)
-    for player_id in range(1, 11):
-        if player_id in scores_by_id:
-            # Sort players by score (lower is better)
-            sorted_players = sorted(scores_by_id[player_id], key=lambda x: x['score'])
-
-            # Group by score to handle ties and assign the same rank/points
-            rank = 0
-            for score, group in groupby(sorted_players, key=lambda x: x['score']):
-                # Assign points for this rank
-                pts = points_list[rank] if rank < len(points_list) else 1
-                group_list = list(group)
-                for player in group_list:
-                    player_points[player['name']]['pts'][player_id] = pts
-                rank += len(group_list)
-
-    # Calculate total points for each player
-    for name, data in player_points.items():
-        data['total'] = sum(data['pts'].values())
-
-    return player_points, player_scores, scores_by_id
-
-def generate_html(scores_by_id, player_points, player_scores):
-    """
-    Generates the HTML content for the results page.
-    """
-
-    # Sort the players by total points in descending order for the second table
-    sorted_players = sorted(player_points.items(), key=lambda item: item[1]['total'], reverse=True)
-
-    # Get a sorted list of all unique players for the first table
-    all_player_names = sorted(player_scores.keys())
-
-    # --- Scores by Player Table HTML (Updated) ---
-    scores_by_name_html = f"""
-    <h2 class="text-3xl font-bold mb-4 text-center text-gray-800">Scores by Player (Lower is Better)</h2>
-    <div class="overflow-x-auto shadow-lg rounded-lg">
-        <table class="min-w-full bg-white rounded-lg">
-            <thead>
-                <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
-                    <th class="py-3 px-3 text-left">Name</th>
-    """
-    for player_id in range(1, 11):
-        scores_by_name_html += f'<th class="py-3 px-3 text-left">Time {player_id}</th>'
-
-    scores_by_name_html += """
-                </tr>
-            </thead>
-            <tbody class="text-gray-600 text-sm font-light">
-    """
-    # Find the best score for each seed to use for highlighting
-    best_scores_per_seed = {}
-    for player_id in range(1, 21):
-        if player_id in scores_by_id and scores_by_id[player_id]:
-            best_scores_per_seed[player_id] = min([p['score'] for p in scores_by_id[player_id]])
-
-    for name in all_player_names:
-        scores_by_name_html += f"""
-                <tr class="border-b border-gray-200 hover:bg-gray-100">
-                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
-                        <a href="https://profiles.topcoder.com/{name}" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">{name}</a>
-                    </td>
-        """
-        for player_id in range(1, 11):
-            score_for_id = player_scores.get(name, {}).get(player_id, 0)
-
-            # Check for highlighting
-            score_class = ""
-            if score_for_id > 0 and player_id in best_scores_per_seed and score_for_id == best_scores_per_seed[player_id]:
-                score_class = "text-green-600 font-bold"
-
-            # Format the score to 2 decimal places
-            formatted_score = f"{score_for_id:.2f}" if score_for_id > 0 else "."
-            scores_by_name_html += f'<td class="py-3 px-3 text-left {score_class}">{formatted_score}</td>'
-
-        scores_by_name_html += """
-                </tr>
-        """
-
-    scores_by_name_html += """
-            </tbody>
-        </table>
-    </div>
-    """
-
-    # --- Player Rankings Table HTML (Unchanged) ---
-    rankings_html = f"""
-    <h2 class="text-3xl font-bold mb-4 text-center text-gray-800 mt-12">Player Rankings</h2>
-    <div class="overflow-x-auto shadow-lg rounded-lg">
-        <table class="min-w-full bg-white rounded-lg">
-            <thead>
-                <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
-                    <th class="py-3 px-3 text-left">Rank</th>
-                    <th class="py-3 px-3 text-left">Name</th>
-                    <th class="py-3 px-3 text-left">Total Points</th>
-    """
-    for player_id in range(1, 11):
-        rankings_html += f'<th class="py-3 px-3 text-left">Pts {player_id}</th>'
-    rankings_html += """
-                </tr>
-            </thead>
-            <tbody class="text-gray-600 text-sm font-light">
-    """
-
-    current_rank = 1
-    # Use a set to handle tied ranks
-    for i, (name, data) in enumerate(sorted_players):
-        # Handle ties in rank
-        if i > 0 and sorted_players[i][1]['total'] < sorted_players[i-1][1]['total']:
-            current_rank = i + 1
-
-        rankings_html += f"""
-                <tr class="border-b border-gray-200 hover:bg-gray-100">
-                    <td class="py-3 px-3 text-left font-bold">{current_rank}</td>
-                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
-                        <a href="https://profiles.topcoder.com/{name}" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">{name}</a>
-                    </td>
-                    <td class="py-3 px-3 text-left font-bold">{data['total']}</td>
-        """
-        for player_id in range(1, 11):
-            rankings_html += f'<td class="py-3 px-3 text-left">{data["pts"].get(player_id, 0)}</td>'
-        rankings_html += "</tr>"
-
-    rankings_html += """
-            </tbody>
-        </table>
-    </div>
-    """
-
-
-    # --- Scores by Player Table HTML (Updated) ---
-    extended_scores_by_name_html = f"""
-    <h2 class="text-3xl font-bold mb-4 text-center text-gray-800">Extended results (Lower is Better)</h2>
-    <div class="overflow-x-auto shadow-lg rounded-lg">
-        <table class="min-w-full bg-white rounded-lg">
-            <thead>
-                <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
-                    <th class="py-3 px-3 text-left">Name</th>
-    """
-    for player_id in range(11, 21):
-        extended_scores_by_name_html += f'<th class="py-3 px-3 text-left">Time {player_id}</th>'
-
-    extended_scores_by_name_html += """
-                </tr>
-            </thead>
-            <tbody class="text-gray-600 text-sm font-light">
-    """
-
-    for name in all_player_names:
-        extended_scores_by_name_html += f"""
-                <tr class="border-b border-gray-200 hover:bg-gray-100">
-                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
-                        <a href="https://profiles.topcoder.com/{name}" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">{name}</a>
-                    </td>
-        """
-        for player_id in range(11, 21):
-            score_for_id = player_scores.get(name, {}).get(player_id, 0)
-
-            # Check for highlighting
-            score_class = ""
-            if score_for_id > 0 and player_id in best_scores_per_seed and score_for_id == best_scores_per_seed[player_id]:
-                score_class = "text-green-600 font-bold"
-
-            # Format the score to 2 decimal places
-            formatted_score = f"{score_for_id:.2f}" if score_for_id > 0 else "."
-            extended_scores_by_name_html += f'<td class="py-3 px-3 text-left {score_class}">{formatted_score}</td>'
-
-        extended_scores_by_name_html += """
-                </tr>
-        """
-
-    extended_scores_by_name_html += """
-            </tbody>
-        </table>
-    </div>
-    """
-
-    full_html = f"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -262,57 +11,129 @@ def generate_html(scores_by_id, player_points, player_scores):
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
         <style>
-            body {{
+            body {
                 font-family: 'Inter', sans-serif;
                 background-color: #f3f4f6;
-            }}
+            }
         </style>
     </head>
     <body class="p-8">
         <div class="max-w-6xl mx-auto space-y-12">
             <h1 class="text-5xl font-extrabold text-center text-gray-900 leading-tight tracking-wider">Racing Car Tester Results</h1>
-            {scores_by_name_html}
-            {rankings_html}
-            {extended_scores_by_name_html}
+            
+    <h2 class="text-3xl font-bold mb-4 text-center text-gray-800">Scores by Player (Lower is Better)</h2>
+    <div class="overflow-x-auto shadow-lg rounded-lg">
+        <table class="min-w-full bg-white rounded-lg">
+            <thead>
+                <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
+                    <th class="py-3 px-3 text-left">Name</th>
+    <th class="py-3 px-3 text-left">Time 1</th><th class="py-3 px-3 text-left">Time 2</th><th class="py-3 px-3 text-left">Time 3</th><th class="py-3 px-3 text-left">Time 4</th><th class="py-3 px-3 text-left">Time 5</th><th class="py-3 px-3 text-left">Time 6</th><th class="py-3 px-3 text-left">Time 7</th><th class="py-3 px-3 text-left">Time 8</th><th class="py-3 px-3 text-left">Time 9</th><th class="py-3 px-3 text-left">Time 10</th>
+                </tr>
+            </thead>
+            <tbody class="text-gray-600 text-sm font-light">
+    
+                <tr class="border-b border-gray-200 hover:bg-gray-100">
+                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
+                        <a href="https://profiles.topcoder.com/dimkadimon" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">dimkadimon</a>
+                    </td>
+        <td class="py-3 px-3 text-left ">15.45</td><td class="py-3 px-3 text-left ">89.25</td><td class="py-3 px-3 text-left ">48.95</td><td class="py-3 px-3 text-left ">25.90</td><td class="py-3 px-3 text-left ">52.85</td><td class="py-3 px-3 text-left ">32.60</td><td class="py-3 px-3 text-left ">33.40</td><td class="py-3 px-3 text-left ">53.05</td><td class="py-3 px-3 text-left ">42.65</td><td class="py-3 px-3 text-left ">63.85</td>
+                </tr>
+        
+                <tr class="border-b border-gray-200 hover:bg-gray-100">
+                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
+                        <a href="https://profiles.topcoder.com/sullyper" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">sullyper</a>
+                    </td>
+        <td class="py-3 px-3 text-left text-green-600 font-bold">15.25</td><td class="py-3 px-3 text-left text-green-600 font-bold">70.50</td><td class="py-3 px-3 text-left text-green-600 font-bold">45.70</td><td class="py-3 px-3 text-left text-green-600 font-bold">25.60</td><td class="py-3 px-3 text-left text-green-600 font-bold">51.85</td><td class="py-3 px-3 text-left text-green-600 font-bold">32.35</td><td class="py-3 px-3 text-left text-green-600 font-bold">32.80</td><td class="py-3 px-3 text-left text-green-600 font-bold">46.05</td><td class="py-3 px-3 text-left text-green-600 font-bold">39.60</td><td class="py-3 px-3 text-left text-green-600 font-bold">62.70</td>
+                </tr>
+        
+                <tr class="border-b border-gray-200 hover:bg-gray-100">
+                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
+                        <a href="https://profiles.topcoder.com/vlad_D" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">vlad_D</a>
+                    </td>
+        <td class="py-3 px-3 text-left ">15.30</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td>
+                </tr>
+        
+            </tbody>
+        </table>
+    </div>
+    
+            
+    <h2 class="text-3xl font-bold mb-4 text-center text-gray-800 mt-12">Player Rankings</h2>
+    <div class="overflow-x-auto shadow-lg rounded-lg">
+        <table class="min-w-full bg-white rounded-lg">
+            <thead>
+                <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
+                    <th class="py-3 px-3 text-left">Rank</th>
+                    <th class="py-3 px-3 text-left">Name</th>
+                    <th class="py-3 px-3 text-left">Total Points</th>
+    <th class="py-3 px-3 text-left">Pts 1</th><th class="py-3 px-3 text-left">Pts 2</th><th class="py-3 px-3 text-left">Pts 3</th><th class="py-3 px-3 text-left">Pts 4</th><th class="py-3 px-3 text-left">Pts 5</th><th class="py-3 px-3 text-left">Pts 6</th><th class="py-3 px-3 text-left">Pts 7</th><th class="py-3 px-3 text-left">Pts 8</th><th class="py-3 px-3 text-left">Pts 9</th><th class="py-3 px-3 text-left">Pts 10</th>
+                </tr>
+            </thead>
+            <tbody class="text-gray-600 text-sm font-light">
+    
+                <tr class="border-b border-gray-200 hover:bg-gray-100">
+                    <td class="py-3 px-3 text-left font-bold">1</td>
+                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
+                        <a href="https://profiles.topcoder.com/sullyper" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">sullyper</a>
+                    </td>
+                    <td class="py-3 px-3 text-left font-bold">1000</td>
+        <td class="py-3 px-3 text-left">100</td><td class="py-3 px-3 text-left">100</td><td class="py-3 px-3 text-left">100</td><td class="py-3 px-3 text-left">100</td><td class="py-3 px-3 text-left">100</td><td class="py-3 px-3 text-left">100</td><td class="py-3 px-3 text-left">100</td><td class="py-3 px-3 text-left">100</td><td class="py-3 px-3 text-left">100</td><td class="py-3 px-3 text-left">100</td></tr>
+                <tr class="border-b border-gray-200 hover:bg-gray-100">
+                    <td class="py-3 px-3 text-left font-bold">2</td>
+                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
+                        <a href="https://profiles.topcoder.com/dimkadimon" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">dimkadimon</a>
+                    </td>
+                    <td class="py-3 px-3 text-left font-bold">735</td>
+        <td class="py-3 px-3 text-left">60</td><td class="py-3 px-3 text-left">75</td><td class="py-3 px-3 text-left">75</td><td class="py-3 px-3 text-left">75</td><td class="py-3 px-3 text-left">75</td><td class="py-3 px-3 text-left">75</td><td class="py-3 px-3 text-left">75</td><td class="py-3 px-3 text-left">75</td><td class="py-3 px-3 text-left">75</td><td class="py-3 px-3 text-left">75</td></tr>
+                <tr class="border-b border-gray-200 hover:bg-gray-100">
+                    <td class="py-3 px-3 text-left font-bold">3</td>
+                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
+                        <a href="https://profiles.topcoder.com/vlad_D" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">vlad_D</a>
+                    </td>
+                    <td class="py-3 px-3 text-left font-bold">75</td>
+        <td class="py-3 px-3 text-left">75</td><td class="py-3 px-3 text-left">0</td><td class="py-3 px-3 text-left">0</td><td class="py-3 px-3 text-left">0</td><td class="py-3 px-3 text-left">0</td><td class="py-3 px-3 text-left">0</td><td class="py-3 px-3 text-left">0</td><td class="py-3 px-3 text-left">0</td><td class="py-3 px-3 text-left">0</td><td class="py-3 px-3 text-left">0</td></tr>
+            </tbody>
+        </table>
+    </div>
+    
+            
+    <h2 class="text-3xl font-bold mb-4 text-center text-gray-800">Extended results (Lower is Better)</h2>
+    <div class="overflow-x-auto shadow-lg rounded-lg">
+        <table class="min-w-full bg-white rounded-lg">
+            <thead>
+                <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
+                    <th class="py-3 px-3 text-left">Name</th>
+    <th class="py-3 px-3 text-left">Time 11</th><th class="py-3 px-3 text-left">Time 12</th><th class="py-3 px-3 text-left">Time 13</th><th class="py-3 px-3 text-left">Time 14</th><th class="py-3 px-3 text-left">Time 15</th><th class="py-3 px-3 text-left">Time 16</th><th class="py-3 px-3 text-left">Time 17</th><th class="py-3 px-3 text-left">Time 18</th><th class="py-3 px-3 text-left">Time 19</th><th class="py-3 px-3 text-left">Time 20</th>
+                </tr>
+            </thead>
+            <tbody class="text-gray-600 text-sm font-light">
+    
+                <tr class="border-b border-gray-200 hover:bg-gray-100">
+                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
+                        <a href="https://profiles.topcoder.com/dimkadimon" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">dimkadimon</a>
+                    </td>
+        <td class="py-3 px-3 text-left ">49.20</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">24.20</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">32.20</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td>
+                </tr>
+        
+                <tr class="border-b border-gray-200 hover:bg-gray-100">
+                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
+                        <a href="https://profiles.topcoder.com/sullyper" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">sullyper</a>
+                    </td>
+        <td class="py-3 px-3 text-left text-green-600 font-bold">42.15</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left text-green-600 font-bold">23.30</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left text-green-600 font-bold">30.75</td><td class="py-3 px-3 text-left text-green-600 font-bold">25.10</td><td class="py-3 px-3 text-left text-green-600 font-bold">38.35</td>
+                </tr>
+        
+                <tr class="border-b border-gray-200 hover:bg-gray-100">
+                    <td class="py-3 px-3 text-left font-bold whitespace-nowrap">
+                        <a href="https://profiles.topcoder.com/vlad_D" class="text-blue-600 hover:text-blue-800 visited:text-purple-600">vlad_D</a>
+                    </td>
+        <td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td><td class="py-3 px-3 text-left ">.</td>
+                </tr>
+        
+            </tbody>
+        </table>
+    </div>
+    
         </div>
     </body>
     </html>
-    """
-    return full_html
-
-
-def main():
-    """
-    Main function to orchestrate the HTML generation process.
-    """
-    if len(sys.argv) > 1:
-        folder_path = sys.argv[1]
-        if not os.path.isdir(folder_path):
-            print(f"Error: The provided path '{folder_path}' is not a valid directory.")
-            sys.exit(1)
-    else:
-        folder_path = os.getcwd()
-        print("No folder path provided. Using the current directory.")
-
-    # Get the optional names to skip parameter
-    names_to_skip = []
-    if len(sys.argv) > 2:
-        names_to_skip = [name.strip() for name in sys.argv[2].split(',')]
-        print(f"Skipping the following names: {', '.join(names_to_skip)}")
-
-    data = read_csv_data(folder_path, names_to_skip)
-    if data is None:
-        sys.exit(1)
-
-    player_points, player_scores, scores_by_id = calculate_points(data)
-
-    html_content = generate_html(scores_by_id, player_points, player_scores)
-
-    output_file_path = os.path.join(folder_path, 'results.html')
-    with open(output_file_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
-
-    print(f"\nSuccessfully generated HTML page at '{output_file_path}'.")
-
-if __name__ == "__main__":
-    main()
+    
